@@ -1,0 +1,31 @@
+這頁分兩個部分：我們已經做了什麼，以及接下來打算做的 future work。
+
+---
+
+【What have we built — 已完成的部分】
+
+目前我們完成了 ArtifactStore 的核心架構。
+
+在資料層，我們設計了 SQLite schema，主要包含 Artifact、Grant、ArtifactSpan 和 ArtifactLink 四張表。Artifact 存放每一次 tool call 的完整輸出，ArtifactSpan 把長輸出切分成可以單獨存取的片段，Grant 則記錄每個 subagent 被允許讀什麼、讀多少 token。我們使用了 SQLite 的 FTS5 extension 讓 Artifact 的內容支援 full-text search。
+
+在存取控制層，我們實作了 Grant policy，每個 Grant 帶有四個維度的限制：operation（允許的操作類型）、view（可以看哪種欄位）、predicate（篩選條件）、以及 token budget。Supervisor 在 delegate subagent 的同時建立 Grant，subagent 的每次存取都由 harness 驗證。
+
+在 agent 架構層，我們完成了雙層 agent loop：supervisor 負責拆解任務、建立 subagent 和 Grant；subagent 在受限範圍內透過 artifact API 查詢並回答問題。
+
+在實驗層，我們設計了四種 baseline（B1 RAW、B2 TRUNCATED、B3 SUMMARY、B4 ARTIFACT），並加入 target-leak 控制實驗，驗證 B4 ARTIFACT 在 target hidden 條件下仍能達到 recall 1.00。
+
+---
+
+【Future Work — 接下來打算做的三個方向】
+
+第一，Pre-filter Threshold。
+
+目前 ArtifactStore 的查詢不管 Grant predicate 篩選出的候選集有多小，都走同一條 FTS5 查詢路徑。當符合條件的 artifact 數量很少時，這條路徑有不必要的 overhead。計畫參考 pgvector advisor 的 pre-filter threshold 概念：當 predicate 縮小後的候選集小於某個閾值（例如 10,000 筆 span），直接做 exact scan；超過閾值再啟動 index，避免小資料集上的 index overhead，同時讓 recall 達到 1.0。
+
+第二，Table Partitioning + Per-Partition Index。
+
+目前所有 artifact 放在同一張表，當 artifact 數量大且 Grant predicate 是 categorical filter（例如只查某個 session 或某種 artifact_type）時，查詢要掃過大量不相關的資料。計畫以 session_id 或 artifact_type 做 LIST partitioning，讓每個 partition 各自維護 index，把查詢範圍限縮在符合 predicate 的 partition 上，降低 latency 並提高 recall。
+
+第三，LLM-Assisted Query Hints。
+
+目前 artifact_search 只有 FTS5 關鍵字匹配，對語意相近但用詞不同的 span 無法有效檢索。計畫引入輕量 LLM 作為 query rewriter：Agent 輸入的 search query 先由 LLM 補充同義詞和相關術語，再送進 FTS5，提升 evidence recall。若 LLM API 無法取用則退回原始 query，不影響主流程。

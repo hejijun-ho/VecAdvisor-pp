@@ -1,0 +1,14 @@
+.venv/
+venv/
+target/
+results/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+data/sift1m/
+*.npy

@@ -1,0 +1,31 @@
+database:
+  host: localhost
+  port: 15432
+  dbname: vecadvisor
+  user: b11902156
+  password: ""
+
+dataset:
+  name: sift1m
+  data_dir: /tmp2/b11902156/data/sift1m
+  dim: 128
+  base_count: 1000000
+  query_count: 10000
+
+benchmark:
+  k_values: [1, 10, 50, 100]
+  filter_selectivities: [0.001, 0.01, 0.05, 0.10]
+  num_queries: 1000
+  warmup_queries: 100
+  cache_modes: ["warm"]
+  batch_size: 5000
+  num_runs: 5
+
+index:
+  hnsw:
+    default_m: 16
+    default_ef_construction: 128
+    default_ef_search: 40
+  ivfflat:
+    default_lists: 1000
+    default_probes: 10

@@ -1,0 +1,62 @@
+【四種 Baseline 的設計方式】
+
+四種 case 都定義在 eval/baselines.py，差別只在 Agent 收到的 context 是什麼形式。
+
+B1 RAW（b1_raw）：
+把完整的 fixture_data 直接放進 user message 的 <output> 標籤位置（直接放到 prompt 裡面），原文一字不漏傳給 LLM。
+沒有任何 tool，Agent 只能靠 context window 裡的靜態文字回答。
+
+B2 TRUNCATED（b2_truncated）：
+先把 max_tokens=200 換算成字元上限（200 × 4 = 800 chars），只保留 fixture_data[:800]，
+超出的部分替換成「... [truncated; total N tokens]」。同樣沒有 tool，Agent 看到的是被截斷的片段。
+
+B3 SUMMARY（b3_summary）：
+先呼叫 deterministic_summary(fixture_data) 產生一份固定規則的摘要，把摘要包在 <summary> 標籤裡傳給 Agent。
+沒有 tool，Agent 看的是摘要版本，原始 log 不保留。
+
+B4 ARTIFACT（b4_artifactstore）：
+呼叫 store.put_artifact(...) 把完整 fixture_data 存進 ArtifactStore（SQLite），取得一個 artifact_id。
+接著呼叫 store.create_grant(...) 建立一個 Grant，賦予 Agent 可使用 search / get_spans / expand_view / find_related 四個操作。
+User message 只傳 artifact_id 和 artifact type，不含原始資料。
+Agent 有四個 artifact_* tool，必須主動呼叫才能讀到內容。
+
+---
+
+【Recall 在 Target shown / Target hidden 的定義】
+
+控制點在 baselines.py 的 _diagnostic_phrase(fixture_meta) 函式，讀取 fixture_meta["reveal_target"]。
+
+Target shown（reveal_target=True）：
+prompt 裡直接寫出 target 的值，例如：
+「Diagnose the root cause of any failure in this pytest output for target 'auth_expiry'.」
+Agent 被明確告知要找哪一個 failure，等於題目直接給了答案的方向。
+
+Target hidden（reveal_target=False）：
+prompt 改成：
+「Diagnose the root cause of THE most diagnostically informative failure in this pytest output.
+The output may contain multiple failures; pick the one with the most actionable evidence.」
+Agent 不知道 target 是什麼，必須自己在多個 failure 中判斷哪一個最關鍵。
+
+在 FIXTURE_REGISTRY（driver.py）裡，pytest_large_run 這個 fixture 的 reveal_target 設為 False，
+因為它有 5 個 failures，如果直接告訴 Agent 答案是 auth_expiry 就失去診斷的意義。
+這個 fixture 同時跑了 reveal_target=True 和 False 兩個版本來做對照。
+
+** evidence_recall() 直接用 substring match，Agent 的 diagnosis 文字裡出現幾個關鍵字就得幾分，5 個全中就是 1.00，0 個就是 0.00。完全不需要人工看輸出。
+
+---
+
+【Δ 是什麼】
+
+Δ = recall（target shown）－ recall（target hidden）
+
+recall 的計算方式定義在 eval/metrics.py 的 evidence_recall()：
+把 Agent 輸出的 diagnosis 文字和 gold truth 的 diagnosis_keywords 做 case-insensitive substring match，
+命中幾個關鍵字除以總數，得出 0 到 1 的分數。
+
+Δ 代表「有沒有給 hint」對結果的影響程度。
+Δ = 0 表示兩種條件下 recall 相同，方法不依賴 hint，結果穩健。
+Δ > 0 表示 target shown 條件下表現更好，代表原本的實驗數字有 target-leak——
+method 其實是靠著 prompt 裡洩漏的答案提升了分數。
+
+表格裡四種 baseline 的 Δ 全部是 0，代表不管有沒有給 hint，recall 數字都沒有變化，
+確認實驗結果沒有因為 target hint 膨脹。B4 ARTIFACT 在 target hidden 的條件下一樣能達到 recall 1.00。

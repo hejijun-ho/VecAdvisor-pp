@@ -1,0 +1,10 @@
+psycopg2-binary>=2.9
+pgvector>=0.2
+numpy>=1.24
+faiss-cpu>=1.7
+h5py>=3.8
+pyyaml>=6.0
+matplotlib>=3.7
+pandas>=2.0
+pytest>=7.3
+tqdm>=4.65
